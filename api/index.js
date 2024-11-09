@@ -168,9 +168,9 @@ app.get('/', (req, res) => {
     res.json({ message: 'Welcome to the DevPost API' });
     });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// app.listen(PORT, () => {
+//   console.log(`Server running on port ${PORT}`);
+// });
 
 // Error handling
 process.on('unhandledRejection', (error) => {
@@ -178,5 +178,5 @@ process.on('unhandledRejection', (error) => {
 });
 
 
-
+module.exports = app;
   
