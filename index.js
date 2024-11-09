@@ -83,28 +83,6 @@ async function scrapeHackathons() {
   }
 }
 
-async function fetchNews() {
-  try {
-    const response = await axios.get('https://www.developer-tech.com/');
-    const news = response.data.map(item => ({
-      title: item.title,
-      desc: item.desc,
-      url: item.url,
-      // Add other fields as needed
-    }));
-
-    // Update cache
-    newsCache = {
-      data: news,
-      lastUpdated: Date.now()
-    };
-
-    return news;
-  } catch (error) {
-    console.error('Fetching news error:', error);
-    throw error;
-  }
-}
 
 app.get('/api/hackathons', async (req, res) => {
   try {
@@ -185,6 +163,10 @@ app.get('/api/contests',async(req,res)=>{
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy' });
 });
+
+app.get('/', (req, res) => {
+    res.json({ message: 'Welcome to the DevPost API' });
+    });
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
