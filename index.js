@@ -178,5 +178,5 @@ process.on('unhandledRejection', (error) => {
 });
 
 
-module.exports = app;
+export default app;
   
