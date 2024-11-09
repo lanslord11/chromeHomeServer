@@ -180,6 +180,10 @@ app.get('/', (req, res) => {
 // });
 
 // Error handling
+
+
+app.options('*', cors(corsOptions));
+
 process.on('unhandledRejection', (error) => {
   console.error('Unhandled Rejection:', error);
 });
@@ -187,3 +191,4 @@ process.on('unhandledRejection', (error) => {
 
 export default app;
   
+
