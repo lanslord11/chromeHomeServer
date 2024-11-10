@@ -11,18 +11,22 @@ const PORT = process.env.PORT || 3000;
 
 const corsOptions = {
   origin: function(origin, callback) {
-    // Allow Chrome extension origins (they start with 'chrome-extension://')
-    if (!origin || origin.startsWith('chrome-extension://')) {
+    // Allow Chrome extension origins and localhost for development
+    if (!origin || 
+        origin.startsWith('chrome-extension://') || 
+        origin === 'http://localhost:5173' ||
+        origin === 'http://localhost:3000') {
       callback(null, true);
     } else {
+      console.log('Blocked origin:', origin); // For debugging
       callback(new Error('Not allowed by CORS'));
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  credentials: true
+  credentials: true,
+  optionsSuccessStatus: 200 // Important for preflight requests
 };
-
 // Enable CORS
 app.use(cors(corsOptions));
 
