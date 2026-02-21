@@ -3,11 +3,15 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import connectDatabase from './config/database.js';
+import Note from './models/Note.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+app.use(express.json());
 
 const corsOptions = {
   origin: function(origin, callback) {
@@ -23,7 +27,7 @@ const corsOptions = {
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'x-user-email'],
   credentials: true,
   optionsSuccessStatus: 200 // Important for preflight requests
 };
@@ -177,6 +181,146 @@ app.get('/api/contests',async(req,res)=>{
   }
 })
 
+// Helper: get user email from header or query (extension sends X-User-Email)
+const getUserEmail = (req) =>
+  req.headers['x-user-email'] || req.query.userEmail || null;
+
+const NOTES_PAGE_LIMIT = 10;
+
+// Notes API (all scoped by user email)
+app.get('/api/notes', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required (X-User-Email header or userEmail query)' });
+    }
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || NOTES_PAGE_LIMIT));
+    const skip = (page - 1) * limit;
+
+    const [notes, total] = await Promise.all([
+      Note.find({ userEmail }).sort({ order: 1, createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Note.countDocuments({ userEmail }),
+    ]);
+    const hasMore = skip + notes.length < total;
+    res.json({ notes, hasMore, nextPage: hasMore ? page + 1 : null });
+  } catch (error) {
+    console.error('Error fetching notes:', error);
+    res.status(500).json({ error: 'Failed to fetch notes' });
+  }
+});
+
+const NOTES_RATE_LIMIT_PER_DAY = 100;
+
+app.post('/api/notes', async (req, res) => {
+  try {
+    const userEmail = req.body.userEmail || getUserEmail(req);
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
+    }
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const countLast24h = await Note.countDocuments({
+      userEmail,
+      createdAt: { $gte: oneDayAgo },
+    });
+    if (countLast24h >= NOTES_RATE_LIMIT_PER_DAY) {
+      return res.status(429).json({
+        error: `Rate limit exceeded. Maximum ${NOTES_RATE_LIMIT_PER_DAY} notes per day.`,
+      });
+    }
+    const { title, content } = req.body;
+    if (!title) {
+      return res.status(400).json({ error: 'Title is required' });
+    }
+    const note = await Note.create({ userEmail, title, content: content || '' });
+    res.status(201).json(note);
+  } catch (error) {
+    console.error('Error creating note:', error);
+    res.status(500).json({ error: 'Failed to create note' });
+  }
+});
+
+app.put('/api/notes/reorder', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
+    }
+    const { noteId, newOrder } = req.body;
+    if (noteId == null || newOrder == null || typeof newOrder !== 'number') {
+      return res.status(400).json({ error: 'noteId and newOrder (number) are required' });
+    }
+    const note = await Note.findOneAndUpdate(
+      { _id: noteId, userEmail },
+      { order: newOrder },
+      { new: true }
+    );
+    if (!note) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    res.json({ success: true, note });
+  } catch (error) {
+    console.error('Error reordering notes:', error);
+    res.status(500).json({ error: 'Failed to reorder notes' });
+  }
+});
+
+app.get('/api/notes/:id', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
+    }
+    const note = await Note.findOne({ _id: req.params.id, userEmail });
+    if (!note) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    res.json(note);
+  } catch (error) {
+    console.error('Error fetching note:', error);
+    res.status(500).json({ error: 'Failed to fetch note' });
+  }
+});
+
+app.put('/api/notes/:id', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
+    }
+    const { title, content } = req.body;
+    const note = await Note.findOneAndUpdate(
+      { _id: req.params.id, userEmail },
+      { ...(title !== undefined && { title }), ...(content !== undefined && { content }) },
+      { new: true, runValidators: true }
+    );
+    if (!note) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    res.json(note);
+  } catch (error) {
+    console.error('Error updating note:', error);
+    res.status(500).json({ error: 'Failed to update note' });
+  }
+});
+
+app.delete('/api/notes/:id', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    if (!userEmail) {
+      return res.status(400).json({ error: 'User email is required' });
+    }
+    const note = await Note.findOneAndDelete({ _id: req.params.id, userEmail });
+    if (!note) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting note:', error);
+    res.status(500).json({ error: 'Failed to delete note' });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy' });
@@ -186,9 +330,11 @@ app.get('/', (req, res) => {
     res.json({ message: 'Welcome to the DevPost API' });
     });
 
-// app.listen(PORT, () => {
-//   console.log(`Server running on port ${PORT}`);
-// });
+connectDatabase();
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
 
 // Error handling
 
